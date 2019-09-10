@@ -1,0 +1,179 @@
+    <html>
+    <head>
+        <title>Corridor</title>
+    </head>
+
+    <body onmousemove=mouseMove(event)>
+    <div  id="xy"></div>
+    <div  id="holder" style="height: 100%;"></div>
+    <script src="jquery.js"></script>
+    <script type="text/javascript" src="raphael.min.js"></script>
+    <script type="text/javascript" src="raphael_free_transform.js"></script>
+    <script type="text/javascript" src="building_factory.js"></script>
+    <script type="text/javascript" src="layout_policy.js"></script>
+    <script>
+        let buildingFactory = new BuildingFactory(1);
+        let typesAndPercentage=[
+            {
+                "type":buildingFactory.buildingTypes.STUDIO,
+                "percentage":10
+            },
+            {
+                "type":buildingFactory.buildingTypes.ONE_BHK,
+                "percentage":20
+            }
+            ,
+            {
+                "type":buildingFactory.buildingTypes.TWO_BHK,
+                "percentage":30
+            },
+            {
+                "type":buildingFactory.buildingTypes.THREE_BHK,
+                "percentage":40
+            }
+        ];
+
+        let layoutPolicy= new LayoutPolicy();
+        let selectedPolicy="parallelPercentage";
+
+
+        let paper = new Raphael(0,50, 1000, 1000),  cx=100,cy=100,w=20,h=40,g=5,dsw=20;
+        let angle;
+        let placeholderShape;
+        placeholderShape = paper.rect(cx, cy - (h+g), dsw*5, 2*(h+g))
+        //paper.circle(cx,cy,8);
+
+        let ft,shapesHolder={};
+        function getPoint(cx,cy,r,angle){
+            return { x:cx+getX(r,angle),y:cy+getY(r,angle)};
+        }
+        function distanceBetween(x1,y1,x2,y2){
+            return Math.sqrt( Math.pow(x1-x2,2) + Math.pow(y1-y2,2));
+        }
+        function mouseMove(e){
+            document.getElementById("xy").innerHTML="x="+e.pageX+"   y="+e.pageY+" angle"+angle
+        }
+        function getAngle(x,y,x1,y1){
+           return Math.atan2(y - y1, x - x1) * 180 / Math.PI;
+        }
+        function getX(r,angle){
+            return r*Math.cos(angle*(Math.PI/180));
+        }
+        function getY(r,angle){
+            return r*Math.sin(angle*(Math.PI/180));
+        }
+
+        function createShape(x,y) {
+            return paper.rect(x,y,dsw,h);
+        }
+
+        function createAndColumn(column,topSP,bottomSP){
+            let d=(column-1)*dsw;
+            shapesHolder[column]={
+                "type":"placeholder",
+                "top":{shape:createShape(topSP.x,topSP.y),
+                    d:d
+                },
+                "bottom":{shape:createShape(bottomSP.x,bottomSP.y),
+                    d:d
+                }
+            };
+        }
+
+        function removeBuildingIfAny(){
+            for (let property in shapesHolder) {
+                if(shapesHolder[property].type=="building" )
+                removeShape(parseInt(property));
+            }
+        }
+
+        function addColumn(column){
+            removeBuildingIfAny();
+            //checking if negative column
+            if(column< 1)
+                return ;
+            let topSP=getPoint(cx,cy,(h+g),270+angle);
+            let bottomSP=getPoint(cx,cy,5,90+angle);
+            // adding  if any column is missing
+            // Object.keys(shapesHolder).length
+            for (let i= 1;i<=column;i++) {
+                if(!shapesHolder[i])
+                    createAndColumn(i,topSP,bottomSP);
+            }
+        }
+
+        function removeShape(index){
+            if(shapesHolder[index] && shapesHolder[index].top) {
+                shapesHolder[index].top.shape.remove();
+                shapesHolder[index].bottom.shape.remove();
+                delete shapesHolder[index];
+            }
+        }
+
+        function removeAllShape(shapesHolder){
+            for (let property in shapesHolder) {
+                removeShape(parseInt(property));
+            }
+        }
+
+
+        function removeLastShape(index) {
+            removeShape(index);
+           // This need to be used if user is moving the mouse fastly
+            for (let property in shapesHolder) {
+                if(parseInt(property)>index){
+                    removeShape(parseInt(property));
+                }
+            }
+        }
+
+        function transformToAlign(columnNode,point){
+            let shape=columnNode.shape;
+            let p=getPoint(point.x,point.y,columnNode.d,angle);
+            //shape.transform(`r${angle}`);
+            let ts=`t${p.x-shape.attrs.x},${((p.y-shape.attrs.y))} r${angle},${shape.attrs.x},${shape.attrs.y}`;
+            shape.transform(ts);
+        }
+
+        function transformColumnToAlign(col){
+            let topSP=getPoint(cx,cy,(h+g),-90+angle);
+            let bottomSP=getPoint(cx,cy,5,90+angle);
+            transformToAlign(col.top,topSP);
+            transformToAlign(col.bottom,bottomSP);
+        }
+
+        function transformAllToAlign(){
+            for (let property in shapesHolder) {
+                transformColumnToAlign(shapesHolder[property]);
+            }
+        }
+        let lastColumn=-1;
+        let freeTransformHandler;
+        freeTransformHandler = function (ft, events) {
+            angle = ft.attrs.rotate;
+            let cx1 = ft.handles.x.disc.attrs.cx,
+                cy1 = ft.handles.x.disc.attrs.cy;
+            cx1 = cx1 - cx1 % dsw;
+            console.log(cx1, cy1, w, "cx1,cy1,w");
+            w = distanceBetween(cx, cy, cx1, cy1);
+            let column = ((w - w % dsw) / dsw)-1;
+
+            // Case 1: Add Shape and transform if does ot exist
+            if (column !== lastColumn && !shapesHolder[column] && column > Object.keys(shapesHolder).length + 1) {
+                addColumn(column);
+                transformColumnToAlign(shapesHolder[column]);
+            }// Case2: if user has drawn more column and wanted to remove
+            else if (column < Object.keys(shapesHolder).length + 1 && lastColumn != column) {
+                removeLastShape(column + 1);
+            } else // Case 3: just changing the angle
+                transformAllToAlign();
+
+            lastColumn = column;
+            if (events[1] == "scale end" || events[0] == "drag end"){                
+                layoutPolicy.applyLayoutPolicy(selectedPolicy, typesAndPercentage, {x: cx, y: cy}, w, angle, shapesHolder);
+            }
+        };
+        ft= paper.freeTransform(placeholderShape, {rotate:true, drag:true},freeTransformHandler );
+    </script>
+</body>
+    </html>
